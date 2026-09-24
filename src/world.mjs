@@ -109,6 +109,8 @@ export class World extends EventEmitter {
       );
       this.livekit = data.livekit;
       this.voiceLevel = data.settings?.voice || "disabled";
+      this.voiceRefDistance = data.settings?.voiceRefDistance;
+      this.voiceRolloffFactor = data.settings?.voiceRolloffFactor;
       this.levels = data.livekit?.levels || {};
       this.muted = new Set(data.livekit?.muted || []);
     }
@@ -130,6 +132,11 @@ export class World extends EventEmitter {
         : this.muted.delete(data.playerId);
     if (type === "settingsModified" && data.key === "voice")
       this.voiceLevel = data.value;
+    if (
+      type === "settingsModified" &&
+      ["voiceRefDistance", "voiceRolloffFactor"].includes(data.key)
+    )
+      this[data.key] = data.value;
     if (type === "kick")
       this.emit(
         "failure",

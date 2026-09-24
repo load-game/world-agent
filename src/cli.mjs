@@ -6,8 +6,8 @@ import { mkdir, readFile, writeFile, unlink, open } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { World } from "./world.mjs";
-import { Codex } from "./codex.mjs";
+import { BrowserWorld as World } from "./browser-world.mjs";
+import { Conversations as Codex } from "./conversations.mjs";
 import { Voice } from "./audio.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url))),
@@ -34,7 +34,10 @@ export function parseArgs(argv) {
   while (rest.length) {
     const flag = rest.shift(),
       value = rest.shift();
-    if (!["--url", "--name", "--radius", "--voice"].includes(flag) || !value)
+    if (
+      !["--url", "--name", "--radius", "--voice", "--owner"].includes(flag) ||
+      !value
+    )
       throw new Error(`Unknown or incomplete option: ${flag}`);
     options[flag.slice(2)] = flag === "--radius" ? Number(value) : value;
   }
@@ -46,6 +49,8 @@ export function parseArgs(argv) {
     throw new Error("Radius must be greater than 0 and at most 40 meters.");
   if (!options.name.trim() || options.name.length > 64)
     throw new Error("Name must be 1–64 characters.");
+  if (options.owner && !/^0x[0-9a-fA-F]{40}$/.test(options.owner))
+    throw new Error("Owner must be a wallet address, never a private key.");
   new URL(options.url);
   return { command, options };
 }
@@ -63,7 +68,7 @@ async function control(action, args = {}) {
       "content-type": "application/json",
     },
     body: JSON.stringify({ action, ...args }),
-    signal: AbortSignal.timeout(action === "text" ? 130000 : 10000),
+    signal: AbortSignal.timeout(action === "text" ? 300000 : 10000),
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || "Control request failed");
@@ -119,8 +124,7 @@ async function run(options) {
     const force = setTimeout(() => process.exit(error ? 1 : 0), 5000);
     force.unref();
     server?.close();
-    await Promise.allSettled([voice.close(), codex.close()]);
-    world.close();
+    await Promise.allSettled([voice.close(), codex.close(), world.close()]);
     await Promise.allSettled([unlink(stateFile), unlink(lockFile)]);
     process.exit(error ? 1 : 0);
   };
@@ -142,6 +146,7 @@ async function run(options) {
     radius: options.radius,
     audio: voice.stats,
     lastTranscript: codex.lastTranscript || null,
+    conversations: codex.status(),
   });
   try {
     await world.connect(options);
@@ -184,11 +189,11 @@ async function run(options) {
             void cleanup();
           });
         } else if (data.action === "say") {
-          world.say(data.text);
+          await world.say(data.text);
           respond(200, { sent: true });
         } else if (data.action === "move") {
-          world.setPosition(data.position);
-          respond(200, snapshot());
+          const motion = await world.setPosition(data.position);
+          respond(200, { ...snapshot(), motion });
         } else if (data.action === "text") {
           if (
             typeof data.text !== "string" ||
@@ -246,7 +251,7 @@ async function start(options) {
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
       reject(new Error("Connection timed out. See .local/agent.log."));
-    }, 210000);
+    }, 300000);
     child.once("error", (error) => {
       clearTimeout(timer);
       reject(error);
@@ -267,14 +272,15 @@ async function start(options) {
 export async function main(argv = process.argv.slice(2)) {
   const { command, options, values } = parseArgs(argv);
   if (command === "help") {
-    console.log(`./connect [start] [--url https://devnet.load.game/] [--name Codex] [--radius 20] [--voice ember]
+    console.log(`./connect [start] [--url https://devnet.load.game/] [--name Codex] [--radius 20] [--voice ember] [--owner 0xADDRESS]
 ./connect status | stop
 ./connect move X Y Z
 ./connect say "Public chat message"
 ./connect text "Prompt the voice companion"
 ./connect run             Run in the foreground
 
-Requires Node.js 22+ and Codex CLI logged in with Realtime access.
+Requires Node.js 22+, Chromium, and Codex CLI logged in with Realtime access.
+Pair the configured wallet in the game: City → Companions. Guests can chat only.
 The default command returns after world, LiveKit, and Codex are connected.
 Audio is sent to your Codex session only for audible players within the radius,
 except speakers with the world's global voice mode. Ctrl+C stops foreground mode.`);

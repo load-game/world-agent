@@ -5,12 +5,25 @@ starts a detached process with a private local control endpoint. Readiness means
 all three connections succeeded: world snapshot, Codex WebRTC data channel, and
 LiveKit microphone publication. Startup failure closes the other connections.
 
-`world.mjs` implements the player wire protocol needed for presence, player
-positions, text chat, and voice settings. It does not download or execute world
-scripts. `protocol.mjs` follows the MessagePack packet IDs in
-[load-game/gamedev](https://github.com/load-game/gamedev/blob/baa675e81aa1df4727ce15b806d6fd79aa4cd2b6/packages/core/packets.js).
-Protocol changes upstream need compatibility checks here. The current engine
-has no version negotiation for these packets.
+`browser-world.mjs` launches Chromium and loads the game's normal entry point.
+It uses the engine's physics, network replication, scene and camera. Headless
+mode ticks simulation at 60 Hz and renders on demand, so software rendering does
+not slow walking to the screenshot frame rate. Readiness waits for loaded app
+scripts and a grounded player. `world.mjs` retains wire utilities used by test
+peers and shared status logic; the connector does not use its coordinate setter.
+
+The server advertises companion protocol 1. Wallet pairing is verified by the
+server and binds the current owner player connection to this agent connection.
+`authority.mjs` requires both that player ID and the current pairing generation.
+Actions repeat the check in the browser immediately before execution. The
+engine also cancels movement and held interactions on pairing changes.
+
+`conversations.mjs` keeps guest, owner and local operator histories separate.
+Only guest audio reaches the guest model, whose dynamic tool list is read-only.
+Only audio from the signed owner player reaches the owner model. Re-pairing
+creates a fresh owner conversation. Closing an old session cannot restore its
+authority or publish late output. Guest interruptions cannot cut off an owner
+reply. One LiveKit output track arbitrates replies with owner priority.
 
 `codex.mjs` launches a restricted Codex app-server and bootstraps its world tools
 before starting Realtime v3. This follows the working Schedule prototype's
@@ -39,7 +52,44 @@ player identity as a browser. No LiveKit API secret is present. Native audio
 libraries need platform binaries, which is why the lockfile and a tested host
 platform are part of the release.
 
-## Verification, September 24, 2026
+## Companion upgrade verification, September 24, 2026
+
+- Engine component checks passed 257 tests with two environment-dependent skips;
+  CI passed with PostgreSQL. World checks passed 199 tests with one skip, plus
+  165 contract tests. The connector passed 22 tests.
+- The one-command connector joined the private test world with renderer, LiveKit
+  and guest Codex Realtime ready. An owner pairing started a separate Realtime
+  session. Owner departure removed it while guest conversation stayed connected.
+- Synthetic guest speech asked it to walk and say "Purple pineapple." It refused
+  movement and answered the phrase. Its position remained at the spawn.
+- A signed owner's synthetic spoken command walked the avatar from x=0 to x=4.92
+  for a target of x=5, with y=0.26 and z=18. The receiver measured peak audio
+  amplitude 18,162 and 47,229 samples above magnitude 100.
+- Browser navigation reached three destinations with continuous sampled positions,
+  including a route around plaza furniture. Observation returned visible named
+  landmarks, and a camera screenshot showed the destination scene.
+- Real pointer clicks opened City → Companions, paired using an injected test
+  wallet's signature, and unpaired. No transaction was sent. A revoked owner
+  action failed in the browser. This is not a physical wallet-extension test.
+
+
+Unit tests exercise signature expiry, replay rejection, disconnect during
+verification, session generation changes, forged guest actions, stale owner
+output, separated input audio, pairing during startup, and interruption priority.
+Engine tests cover route search and cancellation of pending interactions.
+Browser proof includes continuous movement, scene observation, signed pairing,
+revocation and rejection of the revoked owner's subsequent movement command.
+
+Navigation is local and walk-only. Raised ledges that require jumping and other
+unreachable destinations are reported, not bypassed. This is not a global
+navigation mesh. Perception descriptions come from world scripts; screenshot
+requests render the actual camera.
+
+## Original connector verification, September 24, 2026
+
+The following records the earlier socket-only release, before physics, camera
+perception and owner pairing were added.
+
 
 - Automated tests cover wire encoding including Sets, admission, proximity and
   global voice, mutes, coordinates, PCM conversion, mixing/clipping, tool
