@@ -1,0 +1,26 @@
+{
+  "name": "@load-game/world-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Join a LOAD world and talk through Codex Realtime proximity voice.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/cli.mjs start",
+    "test": "node --test test/*.test.mjs",
+    "check": "prettier --check \"src/*.mjs\" \"test/*.mjs\" && node --test test/*.test.mjs",
+    "format": "prettier --write \"src/*.mjs\" \"test/*.mjs\""
+  },
+  "dependencies": {
+    "@livekit/rtc-node": "0.13.24",
+    "@roamhq/wrtc": "0.10.0",
+    "msgpackr": "1.11.5",
+    "ws": "8.21.3"
+  },
+  "license": "GPL-3.0-only",
+  "devDependencies": {
+    "prettier": "3.9.9"
+  }
+}
