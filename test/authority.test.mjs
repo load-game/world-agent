@@ -177,3 +177,45 @@ test("proximity mixing honors the world voice distance settings", async () => {
   world.players.get("speaker").position = [21, 0, 0];
   assert.equal(gainFor(world, "speaker"), 0);
 });
+
+test("voice app-server disables ambient host image and skill tools", async () => {
+  const { PassThrough } = await import("node:stream");
+  let args;
+  const child = new EventEmitter();
+  Object.assign(child, {
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+  });
+  const c = new Codex({
+    cwd: ".",
+    world: {},
+    spawnProcess: (_bin, options) => {
+      args = options;
+      return child;
+    },
+  });
+  c.request = async () => {
+    throw new Error("stop before account access");
+  };
+  await assert.rejects(c.start(), /stop before account access/);
+  for (const feature of [
+    "shell_tool",
+    "view_image",
+    "image_generation",
+    "skill_search",
+    "skill_mcp_dependency_install",
+    "tool_suggest",
+    "plugins",
+    "apps",
+    "hooks",
+  ]) {
+    const index = args.indexOf(feature);
+    assert.ok(index > 0);
+    assert.equal(args[index - 1], "--disable");
+  }
+  c.reader.close();
+  child.stdin.destroy();
+  child.stdout.destroy();
+  child.stderr.destroy();
+});
