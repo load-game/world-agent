@@ -107,6 +107,11 @@ export class Codex extends EventEmitter {
       "multi_agent",
       "goals",
       "hooks",
+      "view_image",
+      "image_generation",
+      "skill_search",
+      "skill_mcp_dependency_install",
+      "tool_suggest",
     ])
       args.push("--disable", feature);
     args.push("-c", 'web_search="disabled"', "-c", "mcp_servers={}");
