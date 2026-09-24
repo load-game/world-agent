@@ -61,5 +61,15 @@ export function gainFor(world, id, radius = 20) {
     ...player.position.map((n, i) => n - self.position[i]),
   );
   // Engine inverse attenuation, with a hard listening boundary for this agent.
-  return distance > radius ? 0 : 1 / (1 + 3 * (Math.max(1, distance) - 1));
+  const ref =
+    Number.isFinite(world.voiceRefDistance) && world.voiceRefDistance > 0
+      ? world.voiceRefDistance
+      : 1;
+  const rolloff =
+    Number.isFinite(world.voiceRolloffFactor) && world.voiceRolloffFactor >= 0
+      ? world.voiceRolloffFactor
+      : 3;
+  return distance > radius
+    ? 0
+    : ref / (ref + rolloff * (Math.max(ref, distance) - ref));
 }

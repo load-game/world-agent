@@ -1,3 +1,4 @@
+import { audioClass } from "./authority.mjs";
 import { EventEmitter } from "node:events";
 import {
   Room,
@@ -72,16 +73,37 @@ export class Voice extends EventEmitter {
       droppedInputFrames: 0,
       interruptions: 0,
     };
-    this.onAudio = ({ audio }) => {
+    this.onAudio = ({ audio, channel = "guest" }) => {
       try {
-        this.enqueue(audio);
+        const samples = outputSamples(audio);
+        const energy =
+          samples.reduce((sum, n) => sum + Math.abs(n), 0) / samples.length;
+        const now = Date.now();
+        if (
+          energy > 25 &&
+          (channel !== "guest" || !this.activeChannel || now > this.activeUntil)
+        ) {
+          if (this.activeChannel !== channel) this.clearOutput();
+          this.activeChannel = channel;
+        }
+        if (this.activeChannel !== channel) return;
+        if (energy > 25) this.activeUntil = now + 600;
+        if (now <= this.activeUntil) this.enqueue(audio);
       } catch (error) {
         this.emit("failure", error);
       }
     };
-    this.onInterrupt = () => {
+    this.onInterrupt = ({ channel } = {}) => {
+      if (channel && this.activeChannel && channel !== this.activeChannel)
+        return;
       this.clearOutput();
       this.stats.interruptions++;
+    };
+    this.onPairing = () => {
+      this.inputs.forEach((input) => {
+        input.frames = [];
+      });
+      this.clearOutput();
     };
     this.onWorld = () => {
       if (!this.canSpeak()) this.clearOutput();
@@ -128,6 +150,7 @@ export class Voice extends EventEmitter {
     await this.room.localParticipant.publishTrack(this.track, publish);
     this.codex.on("thread/realtime/outputAudio/delta", this.onAudio);
     this.world.on("update", this.onWorld);
+    this.world.on("pairing", this.onPairing);
     this.codex.on("interrupted", this.onInterrupt);
     this.timer = setInterval(() => this.tick(), 20);
     this.connected = true;
@@ -165,7 +188,9 @@ export class Voice extends EventEmitter {
   }
   tick() {
     if (this.closing || !this.codex.ready || !this.world.connected) return;
-    const frames = [];
+    const frames = [],
+      ownerFrames = [],
+      guestFrames = [];
     for (const input of this.inputs.values()) {
       const gain = input.track.muted
         ? 0
@@ -175,7 +200,14 @@ export class Voice extends EventEmitter {
         continue;
       }
       const data = input.frames.shift();
-      if (data) frames.push({ data, gain });
+      if (data) {
+        const frame = { data, gain };
+        frames.push(frame);
+        (audioClass(input.identity, this.world.companion) === "owner"
+          ? ownerFrames
+          : guestFrames
+        ).push(frame);
+      }
     }
     const samples = mix(frames);
     const energy = Math.sqrt(
@@ -200,8 +232,14 @@ export class Voice extends EventEmitter {
     }
     this.inFlight = (this.inFlight || 0) + 1;
     if (frames.length) this.stats.inputSamples += SAMPLES;
-    void this.codex
-      .appendAudio(pcmBytes(samples))
+    void (
+      this.codex.appendAudioGroups
+        ? this.codex.appendAudioGroups({
+            owner: pcmBytes(mix(ownerFrames)),
+            guest: pcmBytes(mix(guestFrames)),
+          })
+        : this.codex.appendAudio(pcmBytes(samples))
+    )
       .catch((error) => {
         if (!this.closing) this.emit("failure", error);
       })
@@ -263,6 +301,7 @@ export class Voice extends EventEmitter {
     this.codex.off("interrupted", this.onInterrupt);
     this.codex.off("thread/realtime/outputAudio/delta", this.onAudio);
     this.world.off("update", this.onWorld);
+    this.world.off("pairing", this.onPairing);
     await Promise.allSettled(
       [...this.inputs.values()].map((i) => i.reader.cancel()),
     );

@@ -7,4 +7,7 @@ if [[ ! -f node_modules/.world-agent-lock ]] || ! cmp -s package-lock.json node_
   npm ci --no-fund
   cp package-lock.json node_modules/.world-agent-lock
 fi
+if [[ "${1:-}" != "stop" && "${1:-}" != "status" && "${1:-}" != "help" && "${1:-}" != "--help" ]]; then
+  npx --no-install playwright install chromium
+fi
 exec node src/cli.mjs "$@"
