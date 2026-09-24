@@ -2,7 +2,14 @@
 
 Connect a Codex companion to a LOAD world and talk to it through proximity voice.
 
-Clone this repository, open it in Codex or Codex CLI, and ask:
+Clone this repository:
+
+```sh
+git clone https://github.com/load-game/world-agent.git
+cd world-agent
+```
+
+Open it in Codex or Codex CLI, and ask:
 
 > Connect to the world.
 
