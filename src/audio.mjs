@@ -105,6 +105,7 @@ export class Voice extends EventEmitter {
       });
       this.clearOutput();
     };
+    this.onListening = () => this.onPairing();
     this.onWorld = () => {
       if (!this.canSpeak()) this.clearOutput();
     };
@@ -152,6 +153,7 @@ export class Voice extends EventEmitter {
     this.world.on("update", this.onWorld);
     this.world.on("pairing", this.onPairing);
     this.codex.on("interrupted", this.onInterrupt);
+    this.codex.listening?.on("change", this.onListening);
     this.timer = setInterval(() => this.tick(), 20);
     this.connected = true;
   }
@@ -169,6 +171,7 @@ export class Voice extends EventEmitter {
         const { done, value } = await reader.read();
         if (done) break;
         if (
+          !this.hears(identity) ||
           track.muted ||
           gainFor(this.world, identity, this.world.radius) === 0
         ) {
@@ -186,15 +189,19 @@ export class Voice extends EventEmitter {
       reader.releaseLock();
     }
   }
+  hears(identity) {
+    return this.codex.listening?.allows(identity) ?? true;
+  }
   tick() {
     if (this.closing || !this.codex.ready || !this.world.connected) return;
     const frames = [],
       ownerFrames = [],
       guestFrames = [];
     for (const input of this.inputs.values()) {
-      const gain = input.track.muted
-        ? 0
-        : gainFor(this.world, input.identity, this.world.radius);
+      const gain =
+        input.track.muted || !this.hears(input.identity)
+          ? 0
+          : gainFor(this.world, input.identity, this.world.radius);
       if (!gain) {
         input.frames = [];
         continue;
@@ -209,7 +216,7 @@ export class Voice extends EventEmitter {
         ).push(frame);
       }
     }
-    const samples = mix(frames);
+    const samples = mix(this.activeChannel === "owner" ? ownerFrames : frames);
     const energy = Math.sqrt(
       samples.reduce((sum, n) => sum + n * n, 0) / samples.length,
     );
@@ -299,6 +306,7 @@ export class Voice extends EventEmitter {
     clearInterval(this.timer);
     this.clearOutput();
     this.codex.off("interrupted", this.onInterrupt);
+    this.codex.listening?.off("change", this.onListening);
     this.codex.off("thread/realtime/outputAudio/delta", this.onAudio);
     this.world.off("update", this.onWorld);
     this.world.off("pairing", this.onPairing);

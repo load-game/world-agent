@@ -2,9 +2,17 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, writeFile, unlink, open } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  writeFile,
+  unlink,
+  open,
+  realpath,
+  stat,
+} from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, parse } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { BrowserWorld as World } from "./browser-world.mjs";
 import { Conversations as Codex } from "./conversations.mjs";
@@ -20,22 +28,39 @@ export function parseArgs(argv) {
     name: "Codex",
     radius: 20,
     voice: "ember",
+    permissions: "read-only",
   };
   const rest = argv[0] === "--help" ? ["help"] : [...argv];
   const command = rest[0] && !rest[0].startsWith("--") ? rest.shift() : "start";
   if (
-    !["start", "run", "status", "stop", "say", "move", "text", "help"].includes(
-      command,
-    )
+    ![
+      "start",
+      "run",
+      "status",
+      "stop",
+      "say",
+      "move",
+      "text",
+      "listen",
+      "help",
+    ].includes(command)
   )
     throw new Error(`Unknown command: ${command}`);
-  if (["say", "text", "move"].includes(command))
+  if (["say", "text", "move", "listen"].includes(command))
     return { command, options, values: rest };
   while (rest.length) {
     const flag = rest.shift(),
       value = rest.shift();
     if (
-      !["--url", "--name", "--radius", "--voice", "--owner"].includes(flag) ||
+      ![
+        "--url",
+        "--name",
+        "--radius",
+        "--voice",
+        "--owner",
+        "--permissions",
+        "--project",
+      ].includes(flag) ||
       !value
     )
       throw new Error(`Unknown or incomplete option: ${flag}`);
@@ -51,6 +76,14 @@ export function parseArgs(argv) {
     throw new Error("Name must be 1–64 characters.");
   if (options.owner && !/^0x[0-9a-fA-F]{40}$/.test(options.owner))
     throw new Error("Owner must be a wallet address, never a private key.");
+  if (!["read-only", "workspace-write"].includes(options.permissions))
+    throw new Error("Permissions must be read-only or workspace-write");
+  if (
+    options.permissions === "workspace-write" &&
+    (!options.owner || !options.project)
+  )
+    throw new Error("workspace-write requires --owner and --project");
+  if (options.project) options.project = resolve(options.project);
   new URL(options.url);
   return { command, options };
 }
@@ -102,6 +135,16 @@ async function acquireLock() {
   throw new Error("Could not acquire connection lock.");
 }
 async function run(options) {
+  if (options.project) {
+    options.project = await realpath(options.project);
+    if (
+      !(await stat(options.project)).isDirectory() ||
+      options.project === parse(options.project).root
+    )
+      throw new Error(
+        "Project must be an existing project directory, not the filesystem root",
+      );
+  }
   await acquireLock();
   const world = new World({ radius: options.radius });
   const cwd = join(local, "operator");
@@ -147,6 +190,9 @@ async function run(options) {
     audio: voice.stats,
     lastTranscript: codex.lastTranscript || null,
     conversations: codex.status(),
+    listening: codex.listening.status(),
+    permissions: options.permissions,
+    project: options.project || null,
   });
   try {
     await world.connect(options);
@@ -194,6 +240,11 @@ async function run(options) {
         } else if (data.action === "move") {
           const motion = await world.setPosition(data.position);
           respond(200, { ...snapshot(), motion });
+        } else if (data.action === "listen") {
+          respond(
+            200,
+            codex.listening.change({ mode: data.mode }, { type: "local" }),
+          );
         } else if (data.action === "text") {
           if (
             typeof data.text !== "string" ||
@@ -274,6 +325,8 @@ export async function main(argv = process.argv.slice(2)) {
   if (command === "help") {
     console.log(`./connect [start] [--url https://devnet.load.game/] [--name Codex] [--radius 20] [--voice ember] [--owner 0xADDRESS]
 ./connect status | stop
+./connect listen everyone|owner|deafened
+./connect --owner 0xADDRESS --permissions workspace-write --project /absolute/project
 ./connect move X Y Z
 ./connect say "Public chat message"
 ./connect text "Prompt the voice companion"
@@ -286,7 +339,11 @@ Audio is sent to your Codex session only for audible players within the radius,
 except speakers with the world's global voice mode. Ctrl+C stops foreground mode.`);
   } else if (command === "run") await run(options);
   else if (command === "start") await start(options);
-  else if (command === "move") {
+  else if (command === "listen") {
+    if (values.length !== 1)
+      throw new Error("Usage: ./connect listen everyone|owner|deafened");
+    console.log(JSON.stringify(await control("listen", { mode: values[0] })));
+  } else if (command === "move") {
     if (values.length !== 3) throw new Error("Usage: ./connect move X Y Z");
     console.log(
       JSON.stringify(
