@@ -123,3 +123,50 @@ perception and owner pairing were added.
 Physical microphone, phone, macOS, long sessions, overlapping speakers, and
 restrictive-network relay behavior have not been verified by this repository.
 The existing shared voice service's TURN support remains server-owned.
+
+## Owner listening and project commands
+
+The connector owns a `Listening` policy with `everyone`, `owner`, and `deafened`
+modes plus per-player mutes. Voice filters microphone PCM before mixing. A
+policy change clears local input and playback queues; affected Codex sessions
+close, so buffered utterances and late output cannot resume after unmuting.
+Waking starts a fresh session. Owner-only mode also excludes future arrivals.
+Guest speech cannot interrupt an owner reply through either the mixer or
+Realtime interruption notifications.
+
+BrowserWorld listens only to new chat events, never snapshot history. On servers
+advertising `authenticatedChat: 1`, the server replaces chat IDs, timestamps,
+names and sender IDs from the live socket. The browser stamps owner messages
+with the pairing generation at receipt. The connector checks that generation
+again and parses only exact listening phrases. It does not send chat text into
+a model conversation. On older servers chat controls remain unavailable.
+
+`--permissions workspace-write --project PATH` adds `project_run` only to the
+owner voice model. Guest and local typed models remain without project tools.
+The backing model's native tools remain disabled and its thread stays read-only.
+The connector checks live owner authority in the browser before each command,
+then uses Codex `command/exec` with an explicit workspace-write sandbox, no
+network, no writable temp roots, a 30-second timeout and bounded output. The
+app-server starts in the chosen project: starting it elsewhere adds that cwd to
+Codex's writable roots even when command cwd is overridden. No voice tool can
+select another project, permission policy, environment, or timeout.
+
+Revocation and deafen synchronously detach the privileged conversation before
+closing it. Closing requests `command/exec/terminate` for active commands. The
+sandbox confines writes, not host reads; already completed writes remain.
+Microphone identity authenticates a player connection, not an individual voice.
+
+Verified on 2026-09-25 with Codex CLI 0.154.0:
+
+- Unit tests cover mode transitions, per-player mutes, guest PCM exclusion,
+  owner reply priority, chat forgery/stale generations, owner-only project
+  capabilities, and revocation during pending authorization.
+- `npm run test:sandbox` ran actual commands: the project write succeeded;
+  parent-directory, symlink, `/tmp` writes and loopback network access were
+  denied. Closing terminated a command before its delayed write.
+- A private browser-rendered world and two LiveKit test peers exercised signed
+  pairing, server correction of a forged owner chat sender, spoken owner-only
+  mode, rejection of a muted guest write, and an owner-spoken project write.
+  Spoken deafen closed the owner session; an exact owner chat phrase woke it;
+  spoken restoration brought guest listening back; unpairing removed the owner
+  session. Speech was synthesized, not captured from a physical microphone.

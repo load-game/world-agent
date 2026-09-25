@@ -59,7 +59,7 @@ microphone. Realtime is experimental and account availability can vary.
 `./connect` runs in the background and keeps working after the launching command
 returns. `./connect run` stays in the foreground and stops on Ctrl+C. `npm start`
 also starts the background connection. Run `./connect help` for all options.
-Stop an existing connection before changing its URL, name, voice, or radius.
+Stop an existing connection before changing its URL, name, voice, radius, or project permissions.
 `WORLD_URL` overrides the default URL. `--voice` defaults to `ember`.
 
 The connector uses the normal HTTPS game entry point, including pooled admission.
@@ -109,6 +109,71 @@ who you see in the browser. Joining the same hostname does not guarantee the sam
 city, especially when one city fills. This release does not implement the game's
 friend-travel flow. It reports its assigned city rather than claiming to have
 joined your specific city.
+
+## Owner listening controls
+
+After pairing, say "listen to me" or "mute others" to hear only the owner's
+microphone. This also excludes people who join later. Say "listen to everyone"
+to restore normal proximity chat. The owner can also ask to mute or unmute a
+particular nearby player. These settings affect only the companion's input;
+they do not mute anyone for other players.
+
+Say "deafen" to stop hearing everyone, including the owner. To wake it, type
+**listen to me** in the game's chat from the paired player. Chat accepts only
+these complete phrases, with optional punctuation:
+
+| Phrase | Result |
+| --- | --- |
+| `listen to me` or `mute others` | Owner microphone only |
+| `deafen` | No microphone input |
+| `listen to everyone` or `unmute everyone` | Normal proximity input; clear individual mutes |
+
+Names and wallet strings in messages do not grant control. The server must
+advertise authenticated chat support; otherwise chat controls stay disabled and
+`status` reports `listening.chatControls: false`. Older servers need the engine
+chat authentication update. Ordinary chat text never becomes a task prompt.
+A phrase applies to all companions paired with that player.
+
+Muting closes the affected voice conversation and discards queued audio. Waking
+starts a fresh conversation, which can take several seconds. Wait for the
+companion's "Ready" acknowledgement in game chat before speaking, or check
+`conversations.owner.ready` in `./connect status`. Muting or
+unmuting one guest restarts the shared guest conversation. Owner-only and
+deafened modes stay in effect across unpairing until the owner pairs again or
+the local operator changes the mode. Restarting the connector restores everyone.
+
+The local operator can recover listening without voice or game chat:
+
+```sh
+./connect listen everyone
+./connect listen owner
+./connect listen deafened
+```
+
+## Optional project commands
+
+Read-only is the default. To let the verified owner request file edits and
+commands by microphone, explicitly choose an existing project directory:
+
+```sh
+./connect --owner 0xYOUR_WALLET_ADDRESS \
+  --permissions workspace-write --project /absolute/path/to/project
+```
+
+Only the owner voice conversation gets `project_run`. It executes foreground
+shell commands through the Codex sandbox with writes confined to that project,
+network disabled, and a 30-second timeout. The app-server's working directory
+is also the project so it cannot add a second writable directory. There is no
+full-host-access option. Codex's sandbox can still read files outside the project;
+this option limits writes, not all host reads. See the official
+[Codex app-server sandbox documentation](https://learn.chatgpt.com/docs/app-server).
+
+Guest microphones, owner in-game text, and `./connect text` cannot invoke project
+commands. All model sessions keep their native shell, plugins, and MCP tools
+disabled. The connector checks the signed owner and pairing generation again
+before each project command. Unpairing, owner departure, deafen, or shutdown
+invalidates that session and requests termination of its active commands.
+Already completed writes are not undone. Commands must stay in the foreground.
 
 ## Voice and local data
 

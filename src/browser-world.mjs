@@ -103,6 +103,24 @@ export class BrowserWorld extends World {
         (owner) => world.companions.request("register", { owner }),
         this.owner,
       );
+    await this.page.evaluate(() => {
+      window.__agentChat = [];
+      world.events.on("chat", (message) => {
+        if (!world.chat.authenticated) return;
+        const binding = world.companions.agents.find(
+          (a) => a.id === world.network.id,
+        );
+        if (!binding?.ownerPlayerId || message.fromId !== binding.ownerPlayerId)
+          return;
+        window.__agentChat.push({
+          body: message.body,
+          fromId: message.fromId,
+          generation: binding.generation,
+          authenticated: true,
+        });
+        if (window.__agentChat.length > 32) window.__agentChat.shift();
+      });
+    });
     await this.refresh();
     this.timer = setInterval(() => {
       if (!this.refreshing)
@@ -116,6 +134,8 @@ export class BrowserWorld extends World {
     try {
       const state = await this.page.evaluate(() => ({
         connected: world.network.ws?.readyState === WebSocket.OPEN,
+        authenticatedChat: world.chat.authenticated === true,
+        chatMessages: window.__agentChat?.splice(0) || [],
         id: world.network.id,
         instanceId:
           new URL(world.network.wsUrl).pathname.match(
@@ -141,6 +161,8 @@ export class BrowserWorld extends World {
       }));
       if (!state.connected) throw new Error("World disconnected");
       const previous = this.companion;
+      const messages = state.chatMessages;
+      delete state.chatMessages;
       Object.assign(this, state, {
         players: new Map(state.players.map((p) => [p.id, p])),
         muted: new Set(state.muted),
@@ -150,10 +172,26 @@ export class BrowserWorld extends World {
         previous?.ownerPlayerId !== state.companion?.ownerPlayerId
       )
         this.emit("pairing", state.companion);
+      for (const message of messages) this.emit("chat", message);
       this.emit("update", { type: "state" });
     } finally {
       this.refreshing = false;
     }
+  }
+  async verifyOwner(authority) {
+    const valid = await this.page.evaluate((authority) => {
+      const binding = world.companions.agents.find(
+        (a) => a.id === world.network.id,
+      );
+      return (
+        world.network.ws?.readyState === WebSocket.OPEN &&
+        authority.type === "owner" &&
+        !!binding?.ownerPlayerId &&
+        binding.ownerPlayerId === authority.playerId &&
+        binding.generation === authority.generation
+      );
+    }, authority);
+    if (!valid) throw new Error("Verified owner required");
   }
   // Recheck at execution time in the browser, not just in a cached polling snapshot.
   async act(method, value, authority = { type: "local" }) {

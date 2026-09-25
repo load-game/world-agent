@@ -12,7 +12,8 @@
     "test": "node --test test/*.test.mjs",
     "check": "prettier --check \"src/*.mjs\" \"test/*.mjs\" && node --test test/*.test.mjs",
     "format": "prettier --write \"src/*.mjs\" \"test/*.mjs\"",
-    "test:world": "node test/browser.mjs"
+    "test:world": "node test/browser.mjs",
+    "test:sandbox": "node test/project-sandbox.mjs"
   },
   "dependencies": {
     "@livekit/rtc-node": "0.13.24",
